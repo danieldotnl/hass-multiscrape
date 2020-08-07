@@ -22,11 +22,8 @@ Example configuration:
         name: Release date
         select: '.release-date'
 ```
-
-Example result:
+<a href="https://www.buymeacoffee.com/danieldotnl" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-blue.png" alt="Buy Me A Coffee" style="height: 51px !important;width: 217px !important;" ></a>
 
 Roadmap:
 - create a separate sensor for each field instead of attributes
 - make it async
-
-<a href="https://www.buymeacoffee.com/danieldotnl" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-blue.png" alt="Buy Me A Coffee" style="height: 51px !important;width: 217px !important;" ></a>

@@ -2,7 +2,7 @@
   "domain": "multiscrape",
   "name": "MultiScrape",
   "documentation": "",
-  "requirements": ["beautifulsoup4==4.9.1"],
+  "requirements": ["lxml", "beautifulsoup4==4.9.1"],
   "after_dependencies": ["rest"],
   "codeowners": ["@danieldotnl"]
 }

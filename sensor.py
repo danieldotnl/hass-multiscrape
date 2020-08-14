@@ -39,11 +39,13 @@ DEFAULT_NAME = "Multiscrape Sensor"
 DEFAULT_VERIFY_SSL = True
 DEFAULT_FORCE_UPDATE = False
 DEFAULT_TIMEOUT = 10
+DEFAULT_PARSER = "lxml"
 
 CONF_SELECTORS = "selectors"
 CONF_ATTR = "attribute"
 CONF_SELECT = "select"
 CONF_INDEX = "index"
+CONF_PARSER = "parser"
 
 CONF_SELECTORS = "selectors"
 METHODS = ["POST", "GET"]
@@ -64,12 +66,9 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): cv.boolean,
         vol.Optional(CONF_FORCE_UPDATE, default=DEFAULT_FORCE_UPDATE): cv.boolean,
         vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
+        vol.Optional(CONF_PARSER, default=DEFAULT_PARSER): cv.string,
     }
 )
-
-# PLATFORM_SCHEMA = vol.All(
-    # cv.has_at_least_one_key(CONF_RESOURCE, CONF_RESOURCE_TEMPLATE), PLATFORM_SCHEMA
-# )
 
 SENSOR_SCHEMA = vol.Schema(
     {
@@ -104,6 +103,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     selectors = config.get(CONF_SELECTORS)
     force_update = config.get(CONF_FORCE_UPDATE)
     timeout = config.get(CONF_TIMEOUT)
+    parser = config.get(CONF_PARSER)
 
     if value_template is not None:
         value_template.hass = hass
@@ -119,8 +119,10 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
             auth = HTTPBasicAuth(username, password)
     else:
         auth = None
+        
     rest = RestData(method, resource, auth, headers, payload, verify_ssl, timeout)
     rest.update()
+    
     if rest.data is None:
         raise PlatformNotReady
 
@@ -137,6 +139,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
                 selectors,
                 force_update,
                 resource_template,
+                parser,
             )
         ],
         True,
@@ -156,8 +159,9 @@ class MultiscrapeSensor(Entity):
         selectors,
         force_update,
         resource_template,
+        parser,
     ):
-        """Initialize the REST sensor."""
+        """Initialize the sensor."""
         self._hass = hass
         self.rest = rest
         self._name = name
@@ -168,6 +172,7 @@ class MultiscrapeSensor(Entity):
         self._attributes = None
         self._force_update = force_update
         self._resource_template = resource_template
+        self._parser = parser
 
     @property
     def name(self):
@@ -195,14 +200,14 @@ class MultiscrapeSensor(Entity):
         return self._force_update
 
     def update(self):
-        """Get the latest data from REST API and update the state."""
+
         if self._resource_template is not None:
             self.rest.set_url(self._resource_template.render())
 
         self.rest.update()
         
         if self.rest.data is None:
-            _LOGGER.error("Unable to retrieve data for %s", self.name)
+            _LOGGER.error("Unable to retrieve data for %s", self._name)
             return
         
         value = self.rest.data        
@@ -210,7 +215,7 @@ class MultiscrapeSensor(Entity):
         
         if self._selectors:
         
-            result = BeautifulSoup(self.rest.data)
+            result = BeautifulSoup(self.rest.data, self._parser)
             result.prettify()
             _LOGGER.debug("Data parsed by BeautifulSoup: %s", result)
         
@@ -238,7 +243,7 @@ class MultiscrapeSensor(Entity):
                         _LOGGER.debug("Sensor %s selected: %s", name, value)
                     except IndexError as e:
                         _LOGGER.error("Sensor %s was unable to extract data from HTML", name)
-                        _LOGGER.error("Exception: %s", e)
+                        _LOGGER.debug("Exception: %s", e)
                         continue
 
                     if value_template is not None:
@@ -252,7 +257,7 @@ class MultiscrapeSensor(Entity):
                     else:
                         self._attributes[name] = value
 
-        self._state = "test"
+        self._state = "None"
 
     @property
     def device_state_attributes(self):

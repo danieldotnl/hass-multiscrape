@@ -100,7 +100,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     if resource_template is not None:
         resource_template.hass = hass
-        resource = resource_template.render()
+        resource = resource_template.async_render()
  
     # Must update the sensor now (including fetching the rest resource) to
     # ensure it's updating its state.  
@@ -121,7 +121,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                 value_template,
                 selectors,
                 force_update,
-                resource_template,
                 parser,
             )
         ],
@@ -141,7 +140,6 @@ class MultiscrapeSensor(Entity):
         value_template,
         selectors,
         force_update,
-        resource_template,
         parser,
     ):
         """Initialize the sensor."""
@@ -154,7 +152,6 @@ class MultiscrapeSensor(Entity):
         self._selectors = selectors
         self._attributes = None
         self._force_update = force_update
-        self._resource_template = resource_template
         self._parser = parser
 
     @property
@@ -184,30 +181,27 @@ class MultiscrapeSensor(Entity):
     
     async def async_update(self):
 
-        # if self._resource_template is not None:
-        #     self.rest.set_url(self._resource_template.render())
         try:
             response = await self._httpClient.async_request()
         except:
             e = sys.exc_info()[0]
             _LOGGER.error(e)
-        #self.rest.update()
+            _LOGGER.error("Unable to retrieve data for %s", self._name)
         
         if response is None:
             _LOGGER.error("Unable to retrieve data for %s", self._name)
             return
-        
-        value = response       
-        #_LOGGER.debug("Data fetched from resource: %s", value)
+            
+        #_LOGGER.debug("Data fetched from resource: %s", response)
         
         if self._selectors:
         
-            result = BeautifulSoup(value, self._parser)
+            result = BeautifulSoup(response, self._parser)
             result.prettify()
             _LOGGER.debug("Data parsed by BeautifulSoup: %s", result)
         
             self._attributes = {}
-            if value:
+            if response:
             
                 for device, device_config in self._selectors.items():
                     name = device_config.get(CONF_NAME)

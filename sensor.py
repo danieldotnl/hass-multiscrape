@@ -2,35 +2,26 @@
 import logging
 from xml.parsers.expat import ExpatError
 
-from bs4 import BeautifulSoup
-import requests
-from requests import Session
-from requests.auth import HTTPBasicAuth, HTTPDigestAuth
+import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 import xmltodict
-
+import asyncio
+import aiohttp
+import async_timeout
+import sys 
+from bs4 import BeautifulSoup
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import (
-    CONF_AUTHENTICATION,
-    CONF_FORCE_UPDATE,
-    CONF_HEADERS,
-    CONF_METHOD,
-    CONF_NAME,
-    CONF_PASSWORD,
-    CONF_PAYLOAD,
-    CONF_RESOURCE,
-    CONF_RESOURCE_TEMPLATE,
-    CONF_TIMEOUT,
-    CONF_UNIT_OF_MEASUREMENT,
-    CONF_USERNAME,
-    CONF_VALUE_TEMPLATE,
-    CONF_VERIFY_SSL,
-    HTTP_BASIC_AUTHENTICATION,
-    HTTP_DIGEST_AUTHENTICATION,
-)
+from homeassistant.const import (CONF_AUTHENTICATION, CONF_FORCE_UPDATE,
+                                 CONF_HEADERS, CONF_METHOD, CONF_NAME,
+                                 CONF_PASSWORD, CONF_PAYLOAD, CONF_RESOURCE,
+                                 CONF_RESOURCE_TEMPLATE, CONF_TIMEOUT,
+                                 CONF_UNIT_OF_MEASUREMENT, CONF_USERNAME,
+                                 CONF_VALUE_TEMPLATE, CONF_VERIFY_SSL,
+                                 HTTP_BASIC_AUTHENTICATION,
+                                 HTTP_DIGEST_AUTHENTICATION)
 from homeassistant.exceptions import PlatformNotReady
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,9 +77,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {vol.Required(CONF_SELECTORS): cv.schema_with_slug_keys(SENSOR_SCHEMA)}
 )
 
-
-def setup_platform(hass, config, add_entities, discovery_info=None):
-    """Set up the RESTful sensor."""
+async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
+    """Set up the Multiscrape sensor."""
     name = config.get(CONF_NAME)
     resource = config.get(CONF_RESOURCE)
     resource_template = config.get(CONF_RESOURCE_TEMPLATE)
@@ -111,28 +101,21 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     if resource_template is not None:
         resource_template.hass = hass
         resource = resource_template.render()
-
-    if username and password:
-        if config.get(CONF_AUTHENTICATION) == HTTP_DIGEST_AUTHENTICATION:
-            auth = HTTPDigestAuth(username, password)
-        else:
-            auth = HTTPBasicAuth(username, password)
-    else:
-        auth = None
-        
-    rest = RestData(method, resource, auth, headers, payload, verify_ssl, timeout)
-    rest.update()
-    
-    if rest.data is None:
-        raise PlatformNotReady
-
+ 
     # Must update the sensor now (including fetching the rest resource) to
-    # ensure it's updating its state.
-    add_entities(
+    # ensure it's updating its state.  
+    _httpClient = HttpClient(hass, resource, username, password, headers, verify_ssl, method, timeout)
+    response = await _httpClient.async_request()
+        
+    # if response is None or (response.status // 100) in [4, 5]:
+    #     _LOGGER.error("Error received: %s", await response.read())
+    #     raise PlatformNotReady
+    
+    async_add_entities(
         [
             MultiscrapeSensor(
                 hass,
-                rest,
+                _httpClient,
                 name,
                 unit,
                 value_template,
@@ -147,12 +130,12 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
 
 
 class MultiscrapeSensor(Entity):
-    """Implementation of a REST sensor."""
+    """Implementation of the Multiscrape sensor."""
 
     def __init__(
         self,
         hass,
-        rest,
+        httpClient,
         name,
         unit_of_measurement,
         value_template,
@@ -163,7 +146,7 @@ class MultiscrapeSensor(Entity):
     ):
         """Initialize the sensor."""
         self._hass = hass
-        self.rest = rest
+        self._httpClient = httpClient
         self._name = name
         self._state = None
         self._unit_of_measurement = unit_of_measurement
@@ -187,7 +170,7 @@ class MultiscrapeSensor(Entity):
     @property
     def available(self):
         """Return if the sensor data are available."""
-        return self.rest.data is not None
+        return True
 
     @property
     def state(self):
@@ -198,24 +181,28 @@ class MultiscrapeSensor(Entity):
     def force_update(self):
         """Force update."""
         return self._force_update
+    
+    async def async_update(self):
 
-    def update(self):
-
-        if self._resource_template is not None:
-            self.rest.set_url(self._resource_template.render())
-
-        self.rest.update()
+        # if self._resource_template is not None:
+        #     self.rest.set_url(self._resource_template.render())
+        try:
+            response = await self._httpClient.async_request()
+        except:
+            e = sys.exc_info()[0]
+            _LOGGER.error(e)
+        #self.rest.update()
         
-        if self.rest.data is None:
+        if response is None:
             _LOGGER.error("Unable to retrieve data for %s", self._name)
             return
         
-        value = self.rest.data        
+        value = response       
         #_LOGGER.debug("Data fetched from resource: %s", value)
         
         if self._selectors:
         
-            result = BeautifulSoup(self.rest.data, self._parser)
+            result = BeautifulSoup(value, self._parser)
             result.prettify()
             _LOGGER.debug("Data parsed by BeautifulSoup: %s", result)
         
@@ -250,10 +237,15 @@ class MultiscrapeSensor(Entity):
                     
                         if value_template is not None:
                             value_template.hass = self._hass
-                            
-                        self._attributes[name] = value_template.render_with_possible_json_value(
-                            value, None
-                        )
+
+                        try:
+                            self._attributes[name] = value_template.async_render_with_possible_json_value(
+                                value, None
+                            )
+                        except:
+                            e = sys.exc_info()[0]
+                            _LOGGER.error(e)
+                        
                     else:
                         self._attributes[name] = value
 
@@ -265,48 +257,55 @@ class MultiscrapeSensor(Entity):
         return self._attributes
 
 
-class RestData:
+class HttpClient:
     """Class for handling the data retrieval."""
 
     def __init__(
-        self, method, resource, auth, headers, data, verify_ssl, timeout=DEFAULT_TIMEOUT
+        self,
+        hass, 
+        url: str, 
+        username: str = None,   
+        password: str = None, 
+        headers: str = None,
+        verify_ssl: bool = True, 
+        method: str ='GET', 
+        timeout=DEFAULT_TIMEOUT
     ):
         """Initialize the data object."""
-        self._method = method
-        self._resource = resource
-        self._auth = auth
-        self._headers = headers
-        self._request_data = data
-        self._verify_ssl = verify_ssl
-        self._timeout = timeout
-        self._http_session = Session()
-        self.data = None
-        self.headers = None
+        self._hass = hass
+        self.method = method
+        self.url = url
+        self.username = username
+        self.password = password
+        self.headers = headers
+        self.verify_ssl = verify_ssl
+        self.timeout = timeout
+        self.headers = headers
 
-    def __del__(self):
-        """Destroy the http session on destroy."""
-        self._http_session.close()
+        self._session = async_get_clientsession(hass)
 
-    def set_url(self, url):
-        """Set url."""
-        self._resource = url
+        self._auth = None
+        if self.username and self.password:
+            self._auth = aiohttp.BasicAuth(self.username, self.password)
 
-    def update(self):
-        """Get the latest data from REST service with provided method."""
-        _LOGGER.debug("Updating from %s", self._resource)
+    async def async_request(
+        self,         
+        data=None):
+        """Get the latest data from the url with provided method."""
+
         try:
-            response = self._http_session.request(
-                self._method,
-                self._resource,
-                headers=self._headers,
-                auth=self._auth,
-                data=self._request_data,
-                timeout=self._timeout,
-                verify=self._verify_ssl,
-            )
-            self.data = response.text
-            self.headers = response.headers
-        except requests.exceptions.RequestException as ex:
-            _LOGGER.error("Error fetching data: %s failed with %s", self._resource, ex)
-            self.data = None
-            self.headers = None
+            with async_timeout.timeout(self.timeout):
+                async with self._session.request(
+                    self.method,
+                    self.url,
+                    auth=self._auth,
+                    data=data,
+                    headers=self.headers,
+                    ssl=self.verify_ssl,
+                ) as response:
+                    return await response.text()
+
+        except asyncio.TimeoutError as exception:
+            _LOGGER.error("Timeout occurred while connecting to %s", self.url)
+        except (aiohttp.ClientError, socket.gaierror) as exception:
+            _LOGGER.error("Error occurred while communicating with %s", self.url)

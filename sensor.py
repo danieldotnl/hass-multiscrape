@@ -9,6 +9,7 @@ import asyncio
 import aiohttp
 import async_timeout
 import sys 
+import socket
 from bs4 import BeautifulSoup
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.const import (CONF_AUTHENTICATION, CONF_FORCE_UPDATE,
@@ -105,12 +106,12 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Must update the sensor now (including fetching the rest resource) to
     # ensure it's updating its state.  
     _httpClient = HttpClient(hass, resource, username, password, headers, verify_ssl, method, timeout)
-    response = await _httpClient.async_request()
-        
-    # if response is None or (response.status // 100) in [4, 5]:
-    #     _LOGGER.error("Error received: %s", await response.read())
-    #     raise PlatformNotReady
-    
+    try:
+        response = await _httpClient.async_request()
+    except MultiScrapeCommunicationException as e:
+        _LOGGER.error(e)
+        raise PlatformNotReady
+
     async_add_entities(
         [
             MultiscrapeSensor(
@@ -299,7 +300,13 @@ class HttpClient:
                 ) as response:
                     return await response.text()
 
-        except asyncio.TimeoutError as exception:
-            _LOGGER.error("Timeout occurred while connecting to %s", self.url)
-        except (aiohttp.ClientError, socket.gaierror) as exception:
-            _LOGGER.error("Error occurred while communicating with %s", self.url)
+        except (aiohttp.ClientError, socket.gaierror, asyncio.TimeoutError) as exception:
+            raise MultiScrapeCommunicationException(self.url)
+
+class MultiScrapeCommunicationException(Exception):
+    
+    def __init__(self, url):
+        self.url = url
+
+    def __str__(self):
+        return f'Error while communicating with {self.url}.'

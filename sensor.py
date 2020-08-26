@@ -23,6 +23,8 @@ from homeassistant.const import (CONF_AUTHENTICATION, CONF_FORCE_UPDATE,
 from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from datetime import timedelta
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,12 +34,14 @@ DEFAULT_VERIFY_SSL = True
 DEFAULT_FORCE_UPDATE = False
 DEFAULT_TIMEOUT = 10
 DEFAULT_PARSER = "lxml"
+DEFAULT_SCAN_INTERVAL = 30
 
 CONF_SELECTORS = "selectors"
 CONF_ATTR = "attribute"
 CONF_SELECT = "select"
 CONF_INDEX = "index"
 CONF_PARSER = "parser"
+CONF_SCAN_INTERVAL = "scan_interval"
 
 CONF_SELECTORS = "selectors"
 METHODS = ["POST", "GET", "PUT"]
@@ -59,6 +63,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_FORCE_UPDATE, default=DEFAULT_FORCE_UPDATE): cv.boolean,
         vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
         vol.Optional(CONF_PARSER, default=DEFAULT_PARSER): cv.string,
+        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_int
     }
 )
 
@@ -95,6 +100,13 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     force_update = config.get(CONF_FORCE_UPDATE)
     timeout = config.get(CONF_TIMEOUT)
     parser = config.get(CONF_PARSER)
+    scan_interval = config.get(CONF_SCAN_INTERVAL)
+
+    session = async_get_clientsession(hass)
+
+    auth = None
+    if username and password:
+        auth = aiohttp.BasicAuth(username, password)
 
     if value_template is not None:
         value_template.hass = hass
@@ -102,37 +114,101 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     if resource_template is not None:
         resource_template.hass = hass
         resource = resource_template.async_render()
- 
-    # Must update the sensor now (including fetching the rest resource) to
-    # ensure it's updating its state.  
-    _httpClient = HttpClient(hass, resource, username, password, headers, verify_ssl, method, timeout)
-    try:
-        response = await _httpClient.async_request()
-    except MultiScrapeCommunicationException as e:
-        _LOGGER.error(e)
-        raise PlatformNotReady
 
-    entities = []
+    def select_values(content):
+        result = BeautifulSoup(content, parser)
+        result.prettify()
 
-    for device, device_config in selectors.items():
+        values = {}
+
+        for device, device_config in selectors.items():
                     name = device_config.get(CONF_NAME)
                     select = device_config.get(CONF_SELECT)
                     attr = device_config.get(CONF_ATTR)
                     index = device_config.get(CONF_INDEX)
                     value_template = device_config.get(CONF_VALUE_TEMPLATE)
+
+                    try:
+                        if attr is not None:
+                            value = result.select(select)[index][attr]
+                        else:
+                            tag = result.select(select)[index]
+                            if tag.name in ("style", "script", "template"):
+                                value = tag.string
+                            else:
+                                value = tag.text
+
+                        _LOGGER.debug("Sensor %s selected: %s", name, value)
+                    except IndexError as exception:
+                        _LOGGER.error("Sensor %s was unable to extract data from HTML", name)
+                        _LOGGER.debug("Exception: %s", exception)
+                        return
+
+                    if value_template is not None:
+
+                        if value_template is not None:
+                            value_template.hass = hass
+
+                        try:
+                            values[name] = value_template.async_render_with_possible_json_value(
+                                value, None
+                            )
+                        except Exception as exception:
+                            _LOGGER.error(exception)
+                        
+                    else:
+                        values[name] = value
+
+        return values
+
+    async def async_update_data():
+        """Fetch data from API endpoint.
+
+        This is the place to pre-process the data to lookup tables
+        so entities can quickly look up their data.
+        """
+        try:
+            # Note: asyncio.TimeoutError and aiohttp.ClientError are already
+            # handled by the data update coordinator.
+            async with async_timeout.timeout(timeout):
+                 async with session.request(
+                    method,
+                    resource,
+                    auth=auth,
+                    data=payload,
+                    headers=headers,
+                    ssl=verify_ssl,
+                ) as response:
+                    result = await response.text()
+                    return select_values(result)
+        except Exception:
+            raise PlatformNotReady
+
+    coordinator = DataUpdateCoordinator(
+        hass,
+        _LOGGER,
+        # Name of the data. For logging purposes.
+        name="multiscrape",
+        update_method=async_update_data,
+        # Polling interval. Will only be polled if there are subscribers.
+        update_interval=timedelta(seconds=scan_interval),
+    )
+
+    # Fetch initial data so we have data when entities subscribe
+    await coordinator.async_refresh()
+
+    entities = []
+
+    for device, device_config in selectors.items():
+                    name = device_config.get(CONF_NAME)
                     unit = device_config.get(CONF_UNIT_OF_MEASUREMENT)
 
                     entities.append(MultiscrapeSensor(
                                         hass,
-                                        _httpClient,
+                                        coordinator,
                                         name,
                                         unit,
-                                        value_template,
-                                        select,
-                                        attr,
-                                        index,
                                         force_update,
-                                        parser,
                                     )
                     )                    
 
@@ -144,28 +220,18 @@ class MultiscrapeSensor(Entity):
     def __init__(
         self,
         hass,
-        httpClient,
+        coordinator,
         name,
         unit_of_measurement,
-        value_template,
-        select,
-        attr,
-        index,
-        force_update,
-        parser,
+        force_update
     ):
         """Initialize the sensor."""
         self._hass = hass
-        self._httpClient = httpClient
+        self.coordinator = coordinator
         self._name = name
         self._state = None
         self._unit_of_measurement = unit_of_measurement
-        self._value_template = value_template
-        self._select = select
-        self._attr = attr
-        self._index = index
         self._force_update = force_update
-        self._parser = parser
 
         self._attributes = {}
 
@@ -181,132 +247,40 @@ class MultiscrapeSensor(Entity):
 
     @property
     def available(self):
-        """Return if the sensor data are available."""
-        return True
+        """Return if entity is available."""
+        return self.coordinator.last_update_success
 
     @property
     def state(self):
         """Return the state of the device."""
-        return self._state
+        return self.coordinator.data[self._name]
 
     @property
     def force_update(self):
         """Force update."""
         return self._force_update
+
+    @property
+    def should_poll(self):
+        """No need to poll. Coordinator notifies entity of updates."""
+        return False
+    
+    async def async_added_to_hass(self):
+        """When entity is added to hass."""
+        self.async_on_remove(
+            self.coordinator.async_add_listener(
+                self.async_write_ha_state
+            )
+        )
     
     async def async_update(self):
+        """Update the entity.
 
-        content = None    
-        try:
-            content = await self._httpClient.async_request()
-        except MultiScrapeCommunicationException as e:            
-            _LOGGER.error("Unable to retrieve data for %s: %s", self._name, e)
-        
-        if content is None:
-            _LOGGER.error("Unable to retrieve data for %s", self._name)
-            return
-            
-        #_LOGGER.debug("Data fetched from resource: %s", content)
-        
-        result = BeautifulSoup(content, self._parser)
-        result.prettify()
-        _LOGGER.debug("Data parsed by BeautifulSoup: %s", result)
+        Only used by the generic entity update service.
+        """
+        await self.coordinator.async_request_refresh()
     
-        if content:
-                            
-            try:
-                if self._attr is not None:
-                    value = result.select(self._select)[self._index][self._attr]
-                else:
-                    tag = result.select(self._select)[self._index]
-                    if tag.name in ("style", "script", "template"):
-                        value = tag.string
-                    else:
-                        value = tag.text
-                
-                _LOGGER.debug("Sensor %s selected: %s", self._name, value)
-            except IndexError as e:
-                _LOGGER.error("Sensor %s was unable to extract data from HTML", name)
-                _LOGGER.debug("Exception: %s", e)
-                return
-
-            if self._value_template is not None:
-            
-                if self._value_template is not None:
-                    self._value_template.hass = self._hass
-
-                try:
-                    self._state = self._value_template.async_render_with_possible_json_value(
-                        value, None
-                    )
-                except:
-                    e = sys.exc_info()[0]
-                    _LOGGER.error(e)
-                
-            else:
-                self._state = value
-
     @property
     def device_state_attributes(self):
         """Return the state attributes."""
         return self._attributes
-
-
-class HttpClient:
-    """Class for handling the data retrieval."""
-
-    def __init__(
-        self,
-        hass, 
-        url: str, 
-        username: str = None,   
-        password: str = None, 
-        headers: str = None,
-        verify_ssl: bool = True, 
-        method: str ='GET', 
-        timeout=DEFAULT_TIMEOUT
-    ):
-        """Initialize the data object."""
-        self._hass = hass
-        self.method = method
-        self.url = url
-        self.username = username
-        self.password = password
-        self.headers = headers
-        self.verify_ssl = verify_ssl
-        self.timeout = timeout
-        self.headers = headers
-
-        self._session = async_get_clientsession(hass)
-
-        self._auth = None
-        if self.username and self.password:
-            self._auth = aiohttp.BasicAuth(self.username, self.password)
-
-    async def async_request(
-        self,         
-        data=None):
-        """Get the latest data from the url with provided method."""
-
-        try:
-            with async_timeout.timeout(self.timeout):
-                async with self._session.request(
-                    self.method,
-                    self.url,
-                    auth=self._auth,
-                    data=data,
-                    headers=self.headers,
-                    ssl=self.verify_ssl,
-                ) as response:
-                    return await response.text()
-
-        except (aiohttp.ClientError, socket.gaierror, asyncio.TimeoutError) as exception:
-            raise MultiScrapeCommunicationException(self.url)
-
-class MultiScrapeCommunicationException(Exception):
-    
-    def __init__(self, url):
-        self.url = url
-
-    def __str__(self):
-        return f'Error while communicating with {self.url}.'

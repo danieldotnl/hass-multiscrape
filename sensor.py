@@ -183,26 +183,24 @@ class MultiscrapeSensor(Entity):
     async def async_update(self):
 
         try:
-            response = await self._httpClient.async_request()
-        except:
-            e = sys.exc_info()[0]
-            _LOGGER.error(e)
-            _LOGGER.error("Unable to retrieve data for %s", self._name)
+            content = await self._httpClient.async_request()
+        except MultiScrapeCommunicationException as e:            
+            _LOGGER.error("Unable to retrieve data for %s: %s", self._name, e)
         
-        if response is None:
+        if content is None:
             _LOGGER.error("Unable to retrieve data for %s", self._name)
             return
             
-        #_LOGGER.debug("Data fetched from resource: %s", response)
+        #_LOGGER.debug("Data fetched from resource: %s", content)
         
         if self._selectors:
         
-            result = BeautifulSoup(response, self._parser)
+            result = BeautifulSoup(content, self._parser)
             result.prettify()
             _LOGGER.debug("Data parsed by BeautifulSoup: %s", result)
         
             self._attributes = {}
-            if response:
+            if content:
             
                 for device, device_config in self._selectors.items():
                     name = device_config.get(CONF_NAME)

@@ -40,7 +40,7 @@ CONF_INDEX = "index"
 CONF_PARSER = "parser"
 
 CONF_SELECTORS = "selectors"
-METHODS = ["POST", "GET"]
+METHODS = ["POST", "GET", "PUT"]
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -112,22 +112,31 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         _LOGGER.error(e)
         raise PlatformNotReady
 
-    async_add_entities(
-        [
-            MultiscrapeSensor(
-                hass,
-                _httpClient,
-                name,
-                unit,
-                value_template,
-                selectors,
-                force_update,
-                parser,
-            )
-        ],
-        True,
-    )
+    entities = []
 
+    for device, device_config in selectors.items():
+                    name = device_config.get(CONF_NAME)
+                    select = device_config.get(CONF_SELECT)
+                    attr = device_config.get(CONF_ATTR)
+                    index = device_config.get(CONF_INDEX)
+                    value_template = device_config.get(CONF_VALUE_TEMPLATE)
+                    unit = device_config.get(CONF_UNIT_OF_MEASUREMENT)
+
+                    entities.append(MultiscrapeSensor(
+                                        hass,
+                                        _httpClient,
+                                        name,
+                                        unit,
+                                        value_template,
+                                        select,
+                                        attr,
+                                        index,
+                                        force_update,
+                                        parser,
+                                    )
+                    )                    
+
+    async_add_entities(entities, True)
 
 class MultiscrapeSensor(Entity):
     """Implementation of the Multiscrape sensor."""
@@ -139,7 +148,9 @@ class MultiscrapeSensor(Entity):
         name,
         unit_of_measurement,
         value_template,
-        selectors,
+        select,
+        attr,
+        index,
         force_update,
         parser,
     ):
@@ -150,10 +161,13 @@ class MultiscrapeSensor(Entity):
         self._state = None
         self._unit_of_measurement = unit_of_measurement
         self._value_template = value_template
-        self._selectors = selectors
-        self._attributes = None
+        self._select = select
+        self._attr = attr
+        self._index = index
         self._force_update = force_update
         self._parser = parser
+
+        self._attributes = {}
 
     @property
     def name(self):
@@ -182,6 +196,7 @@ class MultiscrapeSensor(Entity):
     
     async def async_update(self):
 
+        content = None    
         try:
             content = await self._httpClient.async_request()
         except MultiScrapeCommunicationException as e:            
@@ -193,56 +208,43 @@ class MultiscrapeSensor(Entity):
             
         #_LOGGER.debug("Data fetched from resource: %s", content)
         
-        if self._selectors:
-        
-            result = BeautifulSoup(content, self._parser)
-            result.prettify()
-            _LOGGER.debug("Data parsed by BeautifulSoup: %s", result)
-        
-            self._attributes = {}
-            if content:
-            
-                for device, device_config in self._selectors.items():
-                    name = device_config.get(CONF_NAME)
-                    select = device_config.get(CONF_SELECT)
-                    attr = device_config.get(CONF_ATTR)
-                    index = device_config.get(CONF_INDEX)
-                    value_template = device_config.get(CONF_VALUE_TEMPLATE)
-                    unit = device_config.get(CONF_UNIT_OF_MEASUREMENT)
-                    
-                    try:
-                        if attr is not None:
-                            value = result.select(select)[index][attr]
-                        else:
-                            tag = result.select(select)[index]
-                            if tag.name in ("style", "script", "template"):
-                                value = tag.string
-                            else:
-                                value = tag.text
-                        
-                        _LOGGER.debug("Sensor %s selected: %s", name, value)
-                    except IndexError as e:
-                        _LOGGER.error("Sensor %s was unable to extract data from HTML", name)
-                        _LOGGER.debug("Exception: %s", e)
-                        continue
-
-                    if value_template is not None:
-                    
-                        if value_template is not None:
-                            value_template.hass = self._hass
-
-                        try:
-                            self._attributes[name] = value_template.async_render_with_possible_json_value(
-                                value, None
-                            )
-                        except:
-                            e = sys.exc_info()[0]
-                            _LOGGER.error(e)
-                        
+        result = BeautifulSoup(content, self._parser)
+        result.prettify()
+        _LOGGER.debug("Data parsed by BeautifulSoup: %s", result)
+    
+        if content:
+                            
+            try:
+                if self._attr is not None:
+                    value = result.select(self._select)[self._index][self._attr]
+                else:
+                    tag = result.select(self._select)[self._index]
+                    if tag.name in ("style", "script", "template"):
+                        value = tag.string
                     else:
-                        self._attributes[name] = value
+                        value = tag.text
+                
+                _LOGGER.debug("Sensor %s selected: %s", self._name, value)
+            except IndexError as e:
+                _LOGGER.error("Sensor %s was unable to extract data from HTML", name)
+                _LOGGER.debug("Exception: %s", e)
+                return
 
-        self._state = "None"
+            if self._value_template is not None:
+            
+                if self._value_template is not None:
+                    self._value_template.hass = self._hass
+
+                try:
+                    self._state = self._value_template.async_render_with_possible_json_value(
+                        value, None
+                    )
+                except:
+                    e = sys.exc_info()[0]
+                    _LOGGER.error(e)
+                
+            else:
+                self._state = value
 
     @property
     def device_state_attributes(self):

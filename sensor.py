@@ -1,30 +1,41 @@
-"""Support for RESTful API sensors."""
+"""Support for Multiscrape sensors."""
+import asyncio
+from datetime import timedelta
 import logging
+import socket
+import sys
 from xml.parsers.expat import ExpatError
 
-import homeassistant.helpers.config_validation as cv
-import voluptuous as vol
-import xmltodict
-import asyncio
 import aiohttp
 import async_timeout
-import sys 
-import socket
 from bs4 import BeautifulSoup
+import voluptuous as vol
+import xmltodict
+
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import (CONF_AUTHENTICATION, CONF_FORCE_UPDATE,
-                                 CONF_HEADERS, CONF_METHOD, CONF_NAME,
-                                 CONF_PASSWORD, CONF_PAYLOAD, CONF_RESOURCE,
-                                 CONF_RESOURCE_TEMPLATE, CONF_TIMEOUT,
-                                 CONF_UNIT_OF_MEASUREMENT, CONF_USERNAME,
-                                 CONF_VALUE_TEMPLATE, CONF_VERIFY_SSL,
-                                 HTTP_BASIC_AUTHENTICATION,
-                                 HTTP_DIGEST_AUTHENTICATION)
+from homeassistant.const import (
+    CONF_AUTHENTICATION,
+    CONF_FORCE_UPDATE,
+    CONF_HEADERS,
+    CONF_METHOD,
+    CONF_NAME,
+    CONF_PASSWORD,
+    CONF_PAYLOAD,
+    CONF_RESOURCE,
+    CONF_RESOURCE_TEMPLATE,
+    CONF_TIMEOUT,
+    CONF_UNIT_OF_MEASUREMENT,
+    CONF_USERNAME,
+    CONF_VALUE_TEMPLATE,
+    CONF_VERIFY_SSL,
+    HTTP_BASIC_AUTHENTICATION,
+    HTTP_DIGEST_AUTHENTICATION,
+)
 from homeassistant.exceptions import PlatformNotReady
-from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from datetime import timedelta
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,6 +133,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         values = {}
 
         for device, device_config in selectors.items():
+                    key = device
                     name = device_config.get(CONF_NAME)
                     select = device_config.get(CONF_SELECT)
                     attr = device_config.get(CONF_ATTR)
@@ -150,14 +162,14 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                             value_template.hass = hass
 
                         try:
-                            values[name] = value_template.async_render_with_possible_json_value(
+                            values[key] = value_template.async_render_with_possible_json_value(
                                 value, None
                             )
                         except Exception as exception:
                             _LOGGER.error(exception)
                         
                     else:
-                        values[name] = value
+                        values[key] = value
 
         return values
 
@@ -206,6 +218,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                     entities.append(MultiscrapeSensor(
                                         hass,
                                         coordinator,
+                                        device,
                                         name,
                                         unit,
                                         force_update,
@@ -215,19 +228,21 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     async_add_entities(entities, True)
 
 class MultiscrapeSensor(Entity):
-    """Implementation of the Multiscrape sensor."""
-
+    """Implementation of the Multiscrape sensor."""  
+    
     def __init__(
         self,
         hass,
         coordinator,
+        key,
         name,
         unit_of_measurement,
         force_update
     ):
         """Initialize the sensor."""
         self._hass = hass
-        self.coordinator = coordinator
+        self._coordinator = coordinator
+        self._key = key
         self._name = name
         self._state = None
         self._unit_of_measurement = unit_of_measurement
@@ -248,12 +263,12 @@ class MultiscrapeSensor(Entity):
     @property
     def available(self):
         """Return if entity is available."""
-        return self.coordinator.last_update_success
+        return self._coordinator.last_update_success
 
     @property
     def state(self):
         """Return the state of the device."""
-        return self.coordinator.data[self._name]
+        return self._coordinator.data[self._key]
 
     @property
     def force_update(self):
@@ -268,17 +283,14 @@ class MultiscrapeSensor(Entity):
     async def async_added_to_hass(self):
         """When entity is added to hass."""
         self.async_on_remove(
-            self.coordinator.async_add_listener(
+            self._coordinator.async_add_listener(
                 self.async_write_ha_state
             )
         )
     
     async def async_update(self):
-        """Update the entity.
-
-        Only used by the generic entity update service.
-        """
-        await self.coordinator.async_request_refresh()
+        """Update the entity. Only used by the generic entity update service."""
+        await self._coordinator.async_request_refresh()
     
     @property
     def device_state_attributes(self):

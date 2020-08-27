@@ -133,43 +133,43 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         values = {}
 
         for device, device_config in selectors.items():
-                    key = device
-                    name = device_config.get(CONF_NAME)
-                    select = device_config.get(CONF_SELECT)
-                    attr = device_config.get(CONF_ATTR)
-                    index = device_config.get(CONF_INDEX)
-                    value_template = device_config.get(CONF_VALUE_TEMPLATE)
+            key = device
+            name = device_config.get(CONF_NAME)
+            select = device_config.get(CONF_SELECT)
+            attr = device_config.get(CONF_ATTR)
+            index = device_config.get(CONF_INDEX)
+            value_template = device_config.get(CONF_VALUE_TEMPLATE)
 
-                    try:
-                        if attr is not None:
-                            value = result.select(select)[index][attr]
-                        else:
-                            tag = result.select(select)[index]
-                            if tag.name in ("style", "script", "template"):
-                                value = tag.string
-                            else:
-                                value = tag.text
-
-                        _LOGGER.debug("Sensor %s selected: %s", name, value)
-                    except IndexError as exception:
-                        _LOGGER.error("Sensor %s was unable to extract data from HTML", name)
-                        _LOGGER.debug("Exception: %s", exception)
-                        return
-
-                    if value_template is not None:
-
-                        if value_template is not None:
-                            value_template.hass = hass
-
-                        try:
-                            values[key] = value_template.async_render_with_possible_json_value(
-                                value, None
-                            )
-                        except Exception as exception:
-                            _LOGGER.error(exception)
-                        
+            try:
+                if attr is not None:
+                    value = result.select(select)[index][attr]
+                else:
+                    tag = result.select(select)[index]
+                    if tag.name in ("style", "script", "template"):
+                        value = tag.string
                     else:
-                        values[key] = value
+                        value = tag.text
+
+                _LOGGER.debug("Sensor %s selected: %s", name, value)
+            except IndexError as exception:
+                _LOGGER.error("Sensor %s was unable to extract data from HTML", name)
+                _LOGGER.debug("Exception: %s", exception)
+                return
+
+            if value_template is not None:
+
+                if value_template is not None:
+                    value_template.hass = hass
+
+                try:
+                    values[key] = value_template.async_render_with_possible_json_value(
+                        value, None
+                    )
+                except Exception as exception:
+                    _LOGGER.error(exception)
+                
+            else:
+                values[key] = value
 
         return values
 
@@ -192,6 +192,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                     ssl=verify_ssl,
                 ) as response:
                     result = await response.text()
+                    _LOGGER.debug("Response from %s: \n %s", resource, response)
                     return select_values(result)
         except Exception:
             raise PlatformNotReady
@@ -212,18 +213,18 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     entities = []
 
     for device, device_config in selectors.items():
-                    name = device_config.get(CONF_NAME)
-                    unit = device_config.get(CONF_UNIT_OF_MEASUREMENT)
+        name = device_config.get(CONF_NAME)
+        unit = device_config.get(CONF_UNIT_OF_MEASUREMENT)
 
-                    entities.append(MultiscrapeSensor(
-                                        hass,
-                                        coordinator,
-                                        device,
-                                        name,
-                                        unit,
-                                        force_update,
-                                    )
-                    )                    
+        entities.append(MultiscrapeSensor(
+                            hass,
+                            coordinator,
+                            device,
+                            name,
+                            unit,
+                            force_update,
+                        )
+        )                    
 
     async_add_entities(entities, True)
 

@@ -1,8 +1,8 @@
 """Support for Multiscrape sensors."""
 import asyncio
+import datetime
 from datetime import timedelta
 import logging
-import datetime
 import socket
 import sys
 from xml.parsers.expat import ExpatError
@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 import voluptuous as vol
 import xmltodict
 
-from homeassistant.components.sensor import PLATFORM_SCHEMA, ENTITY_ID_FORMAT
+from homeassistant.components.sensor import ENTITY_ID_FORMAT, PLATFORM_SCHEMA
 from homeassistant.const import (
     CONF_AUTHENTICATION,
     CONF_FORCE_UPDATE,
@@ -24,12 +24,12 @@ from homeassistant.const import (
     CONF_PAYLOAD,
     CONF_RESOURCE,
     CONF_RESOURCE_TEMPLATE,
+    CONF_SCAN_INTERVAL,
     CONF_TIMEOUT,
     CONF_UNIT_OF_MEASUREMENT,
     CONF_USERNAME,
     CONF_VALUE_TEMPLATE,
     CONF_VERIFY_SSL,
-    CONF_SCAN_INTERVAL,
     HTTP_BASIC_AUTHENTICATION,
     HTTP_DIGEST_AUTHENTICATION,
 )
@@ -75,7 +75,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_FORCE_UPDATE, default=DEFAULT_FORCE_UPDATE): cv.boolean,
         vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
         vol.Optional(CONF_PARSER, default=DEFAULT_PARSER): cv.string,
-        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_time_period
+        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.time_period
     }
 )
 

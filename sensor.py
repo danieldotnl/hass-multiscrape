@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 import voluptuous as vol
 import xmltodict
 
-from homeassistant.components.sensor import PLATFORM_SCHEMA
+from homeassistant.components.sensor import PLATFORM_SCHEMA, ENTITY_ID_FORMAT
 from homeassistant.const import (
     CONF_AUTHENTICATION,
     CONF_FORCE_UPDATE,
@@ -34,7 +34,7 @@ from homeassistant.const import (
 from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity import Entity, async_generate_entity_id
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 _LOGGER = logging.getLogger(__name__)
@@ -251,11 +251,15 @@ class MultiscrapeSensor(Entity):
 
         self._attributes = {}
 
+        self.entity_id = async_generate_entity_id(
+            ENTITY_ID_FORMAT, key, hass=hass
+        )
+
     @property
     def name(self):
         """Return the name of the sensor."""
         return self._name
-
+    
     @property
     def unit_of_measurement(self):
         """Return the unit the value is expressed in."""

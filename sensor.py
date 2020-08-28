@@ -2,6 +2,7 @@
 import asyncio
 from datetime import timedelta
 import logging
+import datetime
 import socket
 import sys
 from xml.parsers.expat import ExpatError
@@ -28,6 +29,7 @@ from homeassistant.const import (
     CONF_USERNAME,
     CONF_VALUE_TEMPLATE,
     CONF_VERIFY_SSL,
+    CONF_SCAN_INTERVAL,
     HTTP_BASIC_AUTHENTICATION,
     HTTP_DIGEST_AUTHENTICATION,
 )
@@ -45,14 +47,13 @@ DEFAULT_VERIFY_SSL = True
 DEFAULT_FORCE_UPDATE = False
 DEFAULT_TIMEOUT = 10
 DEFAULT_PARSER = "lxml"
-DEFAULT_SCAN_INTERVAL = 30
+DEFAULT_SCAN_INTERVAL = datetime.timedelta(seconds=30)
 
 CONF_SELECTORS = "selectors"
 CONF_ATTR = "attribute"
 CONF_SELECT = "select"
 CONF_INDEX = "index"
 CONF_PARSER = "parser"
-CONF_SCAN_INTERVAL = "scan_interval"
 
 CONF_SELECTORS = "selectors"
 METHODS = ["POST", "GET", "PUT"]
@@ -74,7 +75,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_FORCE_UPDATE, default=DEFAULT_FORCE_UPDATE): cv.boolean,
         vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
         vol.Optional(CONF_PARSER, default=DEFAULT_PARSER): cv.string,
-        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_int
+        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): cv.positive_time_period
     }
 )
 
@@ -204,7 +205,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         name="multiscrape",
         update_method=async_update_data,
         # Polling interval. Will only be polled if there are subscribers.
-        update_interval=timedelta(seconds=scan_interval),
+        update_interval=scan_interval,
     )
 
     # Fetch initial data so we have data when entities subscribe

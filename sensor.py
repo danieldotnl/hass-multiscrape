@@ -81,7 +81,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 
 SENSOR_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_SELECT): cv.string,
+        vol.Required(CONF_SELECT): cv.template,
         vol.Optional(CONF_ATTR): cv.string,
         vol.Optional(CONF_INDEX, default=0): cv.positive_int,
         vol.Required(CONF_NAME): cv.string,
@@ -137,6 +137,10 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
             index = device_config.get(CONF_INDEX)
             value_template = device_config.get(CONF_VALUE_TEMPLATE)
 
+            if select is not None:
+                select.hass = hass
+                select = select.async_render()
+
             try:
                 if attr is not None:
                     value = result.select(select)[index][attr]
@@ -154,9 +158,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                 return
 
             if value_template is not None:
-
-                if value_template is not None:
-                    value_template.hass = hass
+                value_template.hass = hass
 
                 try:
                     values[key] = value_template.async_render_with_possible_json_value(

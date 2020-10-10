@@ -196,7 +196,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                     _LOGGER.debug("Response from %s: \n %s", resource, response)
                     return select_values(result)
         except Exception:
-            raise PlatformNotReady
+            raise UpdateFailed
 
     coordinator = DataUpdateCoordinator(
         hass,
@@ -228,6 +228,9 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         )                    
 
     async_add_entities(entities, True)
+
+class UpdateFailed(Exception):
+    """Raised when an update has failed."""
 
 class MultiscrapeSensor(Entity):
     """Implementation of the Multiscrape sensor."""  

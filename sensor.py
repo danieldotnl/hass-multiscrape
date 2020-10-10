@@ -107,7 +107,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     password = config.get(CONF_PASSWORD)
     headers = config.get(CONF_HEADERS)
     unit = config.get(CONF_UNIT_OF_MEASUREMENT)
-    value_template = config.get(CONF_VALUE_TEMPLATE)
     selectors = config.get(CONF_SELECTORS)
     force_update = config.get(CONF_FORCE_UPDATE)
     timeout = config.get(CONF_TIMEOUT)
@@ -119,9 +118,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     auth = None
     if username and password:
         auth = aiohttp.BasicAuth(username, password)
-
-    if value_template is not None:
-        value_template.hass = hass
 
     if resource_template is not None:
         resource_template.hass = hass

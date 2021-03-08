@@ -3,5 +3,6 @@
   "name": "MultiScrape",
   "documentation": "https://github.com/danieldotnl/hass-multiscrape",
   "requirements": ["lxml", "beautifulsoup4==4.9.1"],
-  "codeowners": ["@danieldotnl"]
+  "codeowners": ["@danieldotnl"],
+  "version": "2.2.0"
 }

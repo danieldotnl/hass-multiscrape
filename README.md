@@ -1,4 +1,7 @@
 # HA MultiScrape custom component
+
+## This repository is discontinued and replaced by https://github.com/danieldotnl/ha-multiscrape. The new repository is part of the default HACS store. Please switch!
+
 This Home Assistant custom component can scrape multiple fields (using CSS selectors) from a single HTTP request (the existing scrape sensor can scrape a single field only). The scraped data becomes available in separate sensors.
 
 It is based on both the existing [Rest sensor](https://www.home-assistant.io/integrations/rest/) and the [Scrape sensor](https://www.home-assistant.io/integrations/scrape). Most properties of the Rest and Scrape sensor apply.
